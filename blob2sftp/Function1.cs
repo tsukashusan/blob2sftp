@@ -28,51 +28,62 @@ namespace blob2sftp
             ILogger log)
         {
             log.LogInformation("C# HTTP trigger function processed a request.");
-
-
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-            dynamic data = JsonConvert.DeserializeObject(requestBody);
-            var data0 = data[0];
-
-            try
+            dynamic datas = JsonConvert.DeserializeObject(requestBody);
+            foreach (var eventData in datas)
             {
-                var url = new Uri(data0.data.url.ToString());
-                var container = url.AbsolutePath.Split('/')[1];
-                int startIndex = "/".Length + container.Length + "/".Length;
-                int length = url.AbsolutePath.Length - startIndex;
-                var blobname = url.AbsolutePath.Substring(startIndex, length);
-                var blobNameArray = blobname.Split('/');
-                var blobFileName = blobNameArray[blobNameArray.Length - 1];
+                if (((string)eventData.data.eventType).Trim() == "Microsoft.EventGrid.SubscriptionValidationEvent")
+                {
+                    var validationCode = eventData.data.validationCode;
+                    string s = validationCode.ToString();
+                    var r = $"{{\"validationResponse\":\"{validationCode}\"}}";
+                    return validationCode != null
+                        ? (ActionResult)new OkObjectResult(r)
+                        : new BadRequestObjectResult("Please pass a name on the query string or in the request body");
+                }
+                else
+                { 
+                    try
+                    {
+                        var url = new Uri(eventData.data.url.ToString());
+                        var container = url.AbsolutePath.Split('/')[1];
+                        int startIndex = "/".Length + container.Length + "/".Length;
+                        int length = url.AbsolutePath.Length - startIndex;
+                        var blobname = url.AbsolutePath.Substring(startIndex, length);
+                        var blobNameArray = blobname.Split('/');
+                        var blobFileName = blobNameArray[blobNameArray.Length - 1];
 
-                var tempPath = Path.GetTempPath();
-                var tempFilePath = Path.Combine(Path.GetTempPath(), blobFileName);
+                        var tempPath = Path.GetTempPath();
+                        var tempFilePath = Path.Combine(Path.GetTempPath(), blobFileName);
 
-                //blob
-                CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
-                //container
-                CloudBlobContainer blobcontainer = blobClient.GetContainerReference(container);
+                        //blob
+                        CloudBlobClient blobClient = storageAccount.CreateCloudBlobClient();
+                        //container
+                        CloudBlobContainer blobcontainer = blobClient.GetContainerReference(container);
 
-                //ダウンロードするファイル名を指定
-                CloudBlockBlob blockBlob_download = blobcontainer.GetBlockBlobReference(blobname);
+                        //ダウンロードするファイル名を指定
+                        CloudBlockBlob blockBlob_download = blobcontainer.GetBlockBlobReference(blobname);
 
-                //ダウンロード処理
-                //ダウンロード後のパスとファイル名を指定。
-                var downloadFile = $"{tempFilePath}";
-                await blockBlob_download.DownloadToFileAsync(downloadFile, System.IO.FileMode.OpenOrCreate);
-                log.LogInformation("blob download successful.");
+                        //ダウンロード処理
+                        //ダウンロード後のパスとファイル名を指定。
+                        var downloadFile = $"{tempFilePath}";
+                        await blockBlob_download.DownloadToFileAsync(downloadFile, System.IO.FileMode.OpenOrCreate);
+                        log.LogInformation("blob download successful.");
 
 
-                await UploadSFTP($"{downloadFile}", blobFileName, log);
-                File.Delete(downloadFile);
-                log.LogInformation("sftp upload successful.");
+                        await UploadSFTP($"{downloadFile}", blobFileName, log);
+                        File.Delete(downloadFile);
+                        log.LogInformation("sftp upload successful.");
 
+                    }
+                    catch (Exception e)
+                    {
+                        log.LogCritical(e.Message);
+                    }
+                }
             }
-            catch (Exception e)
-            {
-                log.LogCritical(e.Message);
-            }
-
             return (ActionResult)new OkObjectResult("");
+
         }
 
         private static async Task UploadSFTP(string filePath, string fileName, ILogger log)
